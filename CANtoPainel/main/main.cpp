@@ -7,8 +7,7 @@
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-
+#include "esp_log.h"
 // ============================================================
 // CONFIGURAÇÃO DO DISPLAY TFT
 // ============================================================
@@ -16,18 +15,38 @@
 #define TFT_SCLK GPIO_NUM_12
 #define TFT_MOSI GPIO_NUM_11
 #define TFT_CS   GPIO_NUM_10
-#define TFT_DC   GPIO_NUM_9
+#define TFT_DC   GPIO_NUM_13
 #define TFT_RST  GPIO_NUM_46
 
 #define TFT_WIDTH  128
 #define TFT_HEIGHT 160
-
+#define COLOR_GREEN 0x07E0
+#define COLOR_RED   0xF800
 // ============================================================
 // VARIÁVEIS GLOBAIS
 // ============================================================
 static spi_device_handle_t tft;
 static uint8_t line_buffer[TFT_WIDTH * 2];
+static const char *TAG = "PAINEL";
 
+
+// ============================================================
+// PARES DE CORES (FUNDO, TEXTO) EM RGB565
+// ============================================================
+typedef struct {
+    uint16_t background;
+    uint16_t text;
+} color_pair_t;
+
+static const color_pair_t color_pairs[] = {
+    {0x0000, 0xFFFF},  // preto + branco
+    {0x001F, 0xFFE0},  // azul  + amarelo
+    {0xF800, 0x07FF},  // vermelho + ciano
+    {0x07E0, 0xF81F},  // verde + magenta
+    {0x7BEF, 0xF800},  // cinza + vermelho
+};
+
+#define NUM_COLOR_PAIRS (sizeof(color_pairs) / sizeof(color_pairs[0]))
 // ============================================================
 // ENVIA UM COMANDO PARA O DISPLAY
 // ===========================================================
@@ -370,11 +389,11 @@ static const uint8_t font_5x7[13][5] =
 
     // V
     {
-        0x77,
-        0x08,
-        0x08,
-        0x08,
-        0x77
+        0x07,
+        0x38,
+        0x60,
+        0x38,
+        0x07
     }
 };
 
@@ -435,71 +454,65 @@ static void tft_text(
 // ============================================================
 extern "C" void app_main(void)
 {
-    // Inicializa o display
     tft_init();
-    // Limpa toda a tela com preto
-    tft_fill_rect(
-        0,
-        0,
-        TFT_WIDTH,
-        TFT_HEIGHT,
+
+    // Iteração e índice de cor inicial
+    uint32_t iteration = 0;
+    uint8_t  color_index = 0;
+
+    // Pinta o fundo inicial
+    tft_fill_rect(0, 0, TFT_WIDTH, TFT_HEIGHT,
+                  color_pairs[color_index].background);
+
+    uint16_t rpm = 0;
+    float value = 0.0f;
+
+    char rpm_text[16];
+    char voltage_text[16];
+
+
+        while (true)
+    {
+       tft_fill_rect(0, 0, TFT_WIDTH, 80, COLOR_GREEN);
+
+    // RPM
+    snprintf(rpm_text, sizeof(rpm_text), "%u", rpm);
+
+    uint8_t rpm_width = strlen(rpm_text) * 6 * 4;
+    uint8_t rpm_x = (TFT_WIDTH - rpm_width) / 2;
+
+    tft_text(
+        rpm_text,
+        rpm_x,
+        35,
+        4,
         0x0000
     );
 
-    float value = 0.0f; // Valor que será exibido
-    char value_text[16];
-    // Loop principal
-    while (true)
-    {
-        // Limpa a região onde o valor será exibido
-        tft_fill_rect(
-            8,
-            48,
-            112,
-            56,
-            0x0000
-        );
+    // Tensão
+    tft_fill_rect(0, 80, TFT_WIDTH, 80, COLOR_RED);
+    snprintf(voltage_text, sizeof(voltage_text), "%.1fV", value);
 
+    uint8_t voltage_width = strlen(voltage_text) * 6 * 3;
+    uint8_t voltage_x = (TFT_WIDTH - voltage_width) / 2;
 
-        // Converte o valor para texto
-        // Exemplo: 12.30V
+    tft_text(
+        voltage_text,
+        voltage_x,
+        95,
+        3,
+        0x0000
+    );
 
-        snprintf(
-            value_text,
-            sizeof(value_text),
-            "%.2fV",
-            value
-        );
+    // Teste
+    rpm += 10;
+    if (rpm > 9000)
+        rpm = 0;
 
+    value += 0.1f;
+    if (value > 99.9f)
+        value = 0.0f;
 
-        // Escreve o valor no display
-
-        tft_text(
-            value_text,
-            22,
-            64,
-            4,
-            0xFFFF
-        );
-
-
-        // Incrementa o valor
-
-        value += 0.1f;
-
-
-        // Volta para zero ao chegar em 100 V
-
-        if (value > 99.9f)
-        {
-            value = 0.0f;
-        }
-
-
-        // Atualiza a cada 1 segundo
-
-        vTaskDelay(
-            pdMS_TO_TICKS(1000)
-        );
+    vTaskDelay(pdMS_TO_TICKS(150));
     }
 }
